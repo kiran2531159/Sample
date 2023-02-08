@@ -1,5 +1,5 @@
 import requests
-import gzip
+import tarfile
 import shutil
 import os
 
@@ -12,11 +12,9 @@ response = requests.get(model_url)
 with open(model_file, "wb") as f:
     f.write(response.content)
 
-with gzip.open(model_file, "rb") as f_in:
-    with open(model_folder + ".tar", "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
+with tarfile.open(model_file, "r:gz") as tar:
+    tar.extractall()
 
-shutil.unpack_archive(model_folder + ".tar", model_folder)
+shutil.move(model_folder, "./")
 
 os.remove(model_file)
-os.remove(model_folder + ".tar")
