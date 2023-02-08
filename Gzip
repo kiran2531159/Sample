@@ -1,20 +1,22 @@
-import gzip
-import io
 import requests
-import tarfile
+import gzip
+import shutil
+import os
 
-# URL of the language model
-url = "http://sourceforge.net/projects/cmusphinx/files/Acoustic%20and%20Language%20Models/US%20English%20generic%20language%20model/cmusphinx-en-us-5.2.tar.gz/download"
+model_url = "https://sourceforge.net/projects/cmusphinx/files/Acoustic%20and%20Language%20Models/en-us-ptm-5.2.tar.gz"
+model_file = "en-us-ptm-5.2.tar.gz"
+model_folder = "en-us-ptm-5.2"
 
-# download the language model
-response = requests.get(url)
-compressed_file = io.BytesIO(response.content)
+response = requests.get(model_url)
 
-# extract the contents of the Gzip file
-with gzip.GzipFile(fileobj=compressed_file) as f:
-    language_model = f.read()
+with open(model_file, "wb") as f:
+    f.write(response.content)
 
-# extract the contents of the Tar file
-with io.BytesIO(language_model) as f:
-    with tarfile.open(fileobj=f, mode='r') as tar:
-        tar.extractall()
+with gzip.open(model_file, "rb") as f_in:
+    with open(model_folder + ".tar", "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+shutil.unpack_archive(model_folder + ".tar", model_folder)
+
+os.remove(model_file)
+os.remove(model_folder + ".tar")
