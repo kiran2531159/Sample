@@ -1,0 +1,20 @@
+import gzip
+import io
+import requests
+import tarfile
+
+# URL of the language model
+url = "http://sourceforge.net/projects/cmusphinx/files/Acoustic%20and%20Language%20Models/US%20English%20generic%20language%20model/cmusphinx-en-us-5.2.tar.gz/download"
+
+# download the language model
+response = requests.get(url)
+compressed_file = io.BytesIO(response.content)
+
+# extract the contents of the Gzip file
+with gzip.GzipFile(fileobj=compressed_file) as f:
+    language_model = f.read()
+
+# extract the contents of the Tar file
+with io.BytesIO(language_model) as f:
+    with tarfile.open(fileobj=f, mode='r') as tar:
+        tar.extractall()
