@@ -1,0 +1,33 @@
+import pocketsphinx as ps
+import requests
+import zipfile
+import io
+
+model_url = "https://sourceforge.net/projects/cmusphinx/files/Acoustic%20and%20Language%20Models/US%20English/cmusphinx-en-us-5.2.tar.gz/download"
+
+# Download the language model
+response = requests.get(model_url)
+zip_file = zipfile.ZipFile(io.BytesIO(response.content))
+zip_file.extractall()
+model_path = zip_file.namelist()[0]
+
+config = ps.Decoder.default_config()
+config.set_string("-hmm", f"{model_path}/en-us")
+config.set_string("-lm", f"{model_path}/en-us.lm.bin")
+config.set_string("-dict", f"{model_path}/cmudict-en-us.dict")
+
+decoder = ps.Decoder(config)
+
+wav_file = "/path/to/audio.wav"
+decoder.start_utt()
+stream = open(wav_file, "rb")
+while True:
+    buf = stream.read(1024)
+    if buf:
+        decoder.process_raw(buf, False, False)
+    else:
+        break
+decoder.end_utt()
+
+text = decoder.hyp().hypstr
+print(text)
