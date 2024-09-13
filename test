@@ -1,0 +1,30 @@
+# Use a base Spark image with Hadoop and Scala
+FROM apache/spark-py:v3.3.0
+
+# Install CUDA libraries (for GPU support)
+# Update this with your preferred CUDA version
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cuda-cudart-11-2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install NVIDIA RAPIDS Spark Accelerator
+# Specify the RAPIDS version, CUDA version, and Spark version
+ENV RAPIDS_VERSION=23.04
+ENV CUDA_VERSION=11.2
+ENV SPARK_VERSION=3.3.0
+
+# Download and install RAPIDS JARs for Spark
+RUN wget https://repo1.maven.org/maven2/com/nvidia/rapids-4-spark_2.12/$RAPIDS_VERSION/rapids-4-spark_2.12-$RAPIDS_VERSION.jar \
+    -P /opt/spark/jars/ \
+    && wget https://repo1.maven.org/maven2/ai/rapids/cudf/$RAPIDS_VERSION/cudf-$RAPIDS_VERSION-cuda$CUDA_VERSION.jar \
+    -P /opt/spark/jars/
+
+# Set environment variables for CUDA and GPU support
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
+ENV SPARK_TASK_GPU_RESOURCE_AMOUNT=1
+
+# Setup necessary dependencies for running Spark with RAPIDS and GPU support
+RUN apt-get install -y nvidia-cuda-toolkit
+
+# Configure entry point or start script for Spark
+CMD ["/opt/spark/bin/spark-submit"]
