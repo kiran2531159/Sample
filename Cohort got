@@ -1,0 +1,45 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Define cohort years and regions
+cohort_years = np.arange(2016, 2026)
+regions = ["North", "South", "East", "West", "Central"]
+
+# Generate sample initial membership numbers for each region
+np.random.seed(42)  # For reproducibility
+initial_members = {region: np.random.randint(5000, 20000, size=len(cohort_years)) for region in regions}
+
+# Generate sample retention rates (random decay over years)
+retention_matrix = {region: np.sort(np.random.uniform(0.2, 1.0, (len(cohort_years), 11)))[:, ::-1] for region in regions}
+
+# Convert retention rates into absolute membership numbers
+cohort_data = {}
+for region in regions:
+    cohort_data[region] = {}
+    for i, year in enumerate(cohort_years):
+        cohort_data[region][year] = [int(initial_members[region][i] * r) if r > 0 else None for r in retention_matrix[region][i]]
+
+# Convert to a MultiIndex DataFrame
+df_list = []
+for region in regions:
+    df = pd.DataFrame.from_dict(cohort_data[region], orient='index', columns=[f"Year {i}" for i in range(11)])
+    df["Region"] = region
+    df_list.append(df)
+
+cohort_df = pd.concat(df_list).reset_index().rename(columns={"index": "Cohort Year"})
+
+# Pivot for heatmap visualization
+pivot_df = cohort_df.melt(id_vars=["Cohort Year", "Region"], var_name="Year Since Start", value_name="Active Members")
+
+# Plot heatmap for each region
+plt.figure(figsize=(15, 8))
+for i, region in enumerate(regions, 1):
+    plt.subplot(2, 3, i)
+    region_df = cohort_df[cohort_df["Region"] == region].set_index("Cohort Year").drop(columns=["Region"])
+    sns.heatmap(region_df, annot=True, fmt='.0f', cmap='Blues', linewidths=0.5)
+    plt.title(f"Region: {region}")
+
+plt.tight_layout()
+plt.show()
