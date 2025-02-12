@@ -1,0 +1,87 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Configuration
+np.random.seed(42)
+num_members = 1000
+start_year_range = (2015, 2025)
+
+# Generate synthetic data
+def generate_member_data(num_records):
+    # Random start dates between 2015-2025
+    start_dates = pd.to_datetime([
+        f"{np.random.randint(start_year_range[0], start_year_range[1]+1)}-"
+        f"{np.random.randint(1, 13):02d}-"
+        f"{np.random.randint(1, 28):02d}"  # Avoid day 29-31 for simplicity
+        for _ in range(num_records)
+    ])
+    
+    df = pd.DataFrame({'start_date': start_dates})
+    
+    # Generate end dates (0-10 years duration)
+    delta_years = np.random.randint(0, 11, size=num_records)
+    df['end_date'] = [
+        start + pd.DateOffset(years=delta) 
+        for start, delta in zip(df['start_date'], delta_years)
+    ]
+    
+    # Cap end dates at 2025-12-31 and convert to NaT for active members
+    df['end_date'] = df['end_date'].where(
+        df['end_date'] <= pd.Timestamp('2025-12-31'), 
+        pd.NaT
+    )
+    
+    return df
+
+df = generate_member_data(num_members)
+
+# Cohort analysis processing
+def calculate_active_years(row):
+    start_year = row['start_date'].year
+    if pd.isnull(row['end_date']):
+        end_year = 2025
+    else:
+        end_year = row['end_date'].year
+    return list(range(start_year, end_year + 1))
+
+# Prepare data for cohort analysis
+df['cohort_year'] = df['start_date'].dt.year
+df['active_years'] = df.apply(calculate_active_years, axis=1)
+df_exploded = df.explode('active_years')
+
+# Create cohort matrix
+cohort_data = df_exploded.groupby(
+    ['cohort_year', 'active_years']
+).size().reset_index(name='count')
+
+cohort_data['years_since_start'] = cohort_data['active_years'] - cohort_data['cohort_year']
+cohort_pivot = cohort_data.pivot_table(
+    index='cohort_year',
+    columns='years_since_start',
+    values='count',
+    fill_value=0
+)
+
+# Visualization
+plt.figure(figsize=(14, 10))
+sns.heatmap(
+    cohort_pivot,
+    annot=True,
+    fmt='d',
+    cmap='YlGnBu',
+    linewidths=0.5,
+    mask=cohort_pivot == 0
+)
+
+plt.title('Membership Cohort Analysis (2015-2025)\nActive Members by Start Year', pad=20)
+plt.xlabel('Years Since Joining')
+plt.ylabel('Cohort Year')
+plt.xticks(rotation=45)
+plt.yticks(rotation=0)
+plt.show()
+
+# Display raw cohort table
+print("\nCohort Analysis Table:")
+print(cohort_pivot)
