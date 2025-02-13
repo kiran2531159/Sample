@@ -1,0 +1,69 @@
+WITH employee_cohort AS (
+    -- Identify the first active year (cohort year) for each employee
+    SELECT 
+        customer_number,
+        emp_id,
+        plan_id,
+        MIN(year) AS cohort_year
+    FROM your_table
+    WHERE elig_active = 1
+    GROUP BY customer_number, emp_id, plan_id
+),
+cohort_retention AS (
+    -- Count employees who are active in each year, even if they had inactive periods
+    SELECT 
+        ec.customer_number,
+        ec.plan_id,
+        ec.cohort_year,
+        t.year,
+        COUNT(DISTINCT t.emp_id) AS active_employees
+    FROM employee_cohort ec
+    JOIN your_table t
+        ON ec.emp_id = t.emp_id
+        AND ec.plan_id = t.plan_id
+        AND ec.customer_number = t.customer_number
+        AND t.year >= ec.cohort_year  -- Only consider years after cohort entry
+    WHERE t.elig_active = 1  -- Employee must be active in the year
+    GROUP BY ec.customer_number, ec.plan_id, ec.cohort_year, t.year
+),
+cohort_size AS (
+    -- Get the total size of each cohort (all employees who started in that year)
+    SELECT 
+        customer_number,
+        plan_id,
+        cohort_year,
+        COUNT(DISTINCT emp_id) AS cohort_size
+    FROM employee_cohort
+    GROUP BY customer_number, plan_id, cohort_year
+),
+retention_calculated AS (
+    -- Calculate retention rate and add a column for the offset (year_n)
+    SELECT 
+        cr.customer_number,
+        cr.plan_id,
+        cr.cohort_year,
+        cr.year,
+        cs.cohort_size,
+        ROUND((cr.active_employees * 100.0 / cs.cohort_size), 2) AS retention_rate,
+        cr.year - cr.cohort_year AS year_offset
+    FROM cohort_retention cr
+    JOIN cohort_size cs
+        ON cr.customer_number = cs.customer_number
+        AND cr.plan_id = cs.plan_id
+        AND cr.cohort_year = cs.cohort_year
+)
+
+-- Pivot the data to form the retention matrix
+SELECT 
+    customer_number,
+    plan_id,
+    cohort_year,
+    MAX(cohort_size) AS cohort_size,
+    MAX(CASE WHEN year_offset = 0 THEN retention_rate END) AS year_0,
+    MAX(CASE WHEN year_offset = 1 THEN retention_rate END) AS year_1,
+    MAX(CASE WHEN year_offset = 2 THEN retention_rate END) AS year_2,
+    MAX(CASE WHEN year_offset = 3 THEN retention_rate END) AS year_3,
+    MAX(CASE WHEN year_offset = 4 THEN retention_rate END) AS year_4
+FROM retention_calculated
+GROUP BY customer_number, plan_id, cohort_year
+ORDER BY customer_number, plan_id, cohort_year;
