@@ -1,2 +1,133 @@
 npm install ejs express cors body-parser knex pg mssql ibm_db hive-driver dotenv
+--------------
 
+/node-db-app
+│── /views          (UI Templates)
+│   │── index.ejs   (Home Page with Query Form)
+│── server.js       (Main Server File)
+│── dbController.js (Handles Database Logic)
+│── .env            (Environment Variables)
+│── package.json
+--------------
+PORT=3000 .env file
+----------------Update server.js (Main Server)
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const dbController = require('./dbController');
+
+const app = express();
+app.use(cors());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static('public'));
+app.set('view engine', 'ejs');
+
+app.get('/', (req, res) => res.render('index', { result: null, error: null }));
+app.post('/connect', dbController.connectDatabase);
+app.post('/query', dbController.executeQuery);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+
+
+-------------Update dbController.js
+const knex = require('knex');
+const sql = require('mssql');
+const ibmdb = require('ibm_db');
+const { HiveClient, TCLIService } = require('hive-driver');
+
+let activeConnection = null;
+
+async function connectDatabase(req, res) {
+  const { dbType, host, port, user, password } = req.body;
+
+  try {
+    if (dbType === 'pg') {
+      activeConnection = knex({
+        client: 'pg',
+        connection: { host, user, password, database: 'mydb', port },
+      });
+    } else if (dbType === 'mssql') {
+      activeConnection = await sql.connect({ user, password, server: host, database: 'mydb', options: { encrypt: true } });
+    } else if (dbType === 'db2') {
+      activeConnection = await ibmdb.open(`DATABASE=mydb;HOSTNAME=${host};UID=${user};PWD=${password};PORT=${port};PROTOCOL=TCPIP`);
+    } else if (dbType === 'hive') {
+      const hiveClient = new HiveClient(TCLIService);
+      activeConnection = await hiveClient.connect({ host, port, options: { kerberos_principal: `${user}@REALM` } });
+    } else {
+      return res.render('index', { result: null, error: 'Unsupported database type' });
+    }
+
+    res.render('index', { result: `Connected to ${dbType.toUpperCase()}!`, error: null });
+  } catch (error) {
+    res.render('index', { result: null, error: error.message });
+  }
+}
+
+async function executeQuery(req, res) {
+  const { query } = req.body;
+  if (!activeConnection) return res.render('index', { result: null, error: 'No active connection' });
+
+  try {
+    let result;
+    if (activeConnection instanceof knex) {
+      result = await activeConnection.raw(query);
+    } else if (activeConnection instanceof sql.ConnectionPool) {
+      result = await activeConnection.request().query(query);
+    } else if (activeConnection instanceof ibmdb.Database) {
+      result = await activeConnection.query(query);
+    } else {
+      return res.render('index', { result: null, error: 'Invalid connection type' });
+    }
+
+    res.render('index', { result: JSON.stringify(result, null, 2), error: null });
+  } catch (error) {
+    res.render('index', { result: null, error: error.message });
+  }
+}
+
+module.exports = { connectDatabase, executeQuery };
+
+---------------views/index.ejs (UI)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Query Tool</title>
+</head>
+<body>
+    <h2>Connect to Database</h2>
+    <form action="/connect" method="POST">
+        <label>Database Type:</label>
+        <select name="dbType">
+            <option value="pg">PostgreSQL</option>
+            <option value="mssql">MSSQL</option>
+            <option value="db2">DB2</option>
+            <option value="hive">Hive</option>
+        </select>
+        <label>Host:</label> <input type="text" name="host" required>
+        <label>Port:</label> <input type="number" name="port" required>
+        <label>Username:</label> <input type="text" name="user" required>
+        <label>Password:</label> <input type="password" name="password" required>
+        <button type="submit">Connect</button>
+    </form>
+
+    <% if (result) { %>
+        <h3>Result:</h3>
+        <pre><%= result %></pre>
+    <% } %>
+    <% if (error) { %>
+        <h3 style="color:red">Error:</h3>
+        <p><%= error %></p>
+    <% } %>
+
+    <h2>Run SQL Query</h2>
+    <form action="/query" method="POST">
+        <textarea name="query" rows="4" cols="50" required></textarea>
+        <button type="submit">Execute</button>
+    </form>
+</body>
+</html>
+----------
