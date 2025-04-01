@@ -1,0 +1,2 @@
+npm install ejs express cors body-parser knex pg mssql ibm_db hive-driver dotenv
+
