@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import ibm_db
-import mysql.connector
 import pyodbc
-from pyhive import hive
 import matplotlib.pyplot as plt
 import plotly.express as px
 
@@ -20,7 +18,7 @@ except FileNotFoundError:
     st.stop()
 
 # Database selection
-db_type = st.selectbox("Select Database Type", ["DB2", "MySQL", "MS SQL", "Hive"])
+db_type = st.selectbox("Select Database Type", ["DB2", "MS SQL"])
 
 # Display connection details from JSON (read-only)
 st.subheader("Connection Details (Loaded from auth.json)")
@@ -40,27 +38,9 @@ def connect_to_db(db_type, auth):
             password = auth.get("password", "")
             conn = ibm_db.connect(conn_str, username, password)
             return conn
-        elif db_type == "MySQL":
-            conn = mysql.connector.connect(
-                host=auth["host"],
-                port=auth["port"],
-                database=auth["database"],
-                user=auth.get("username", ""),
-                password=auth.get("password", "")
-            )
-            return conn
         elif db_type == "MS SQL":
             conn = pyodbc.connect(
                 f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={auth['host']},{auth['port']};DATABASE={auth['database']};UID={auth.get('username', '')};PWD={auth.get('password', '')}"
-            )
-            return conn
-        elif db_type == "Hive":
-            conn = hive.connect(
-                host=auth["host"],
-                port=auth["port"],
-                database=auth["database"],
-                auth="KERBEROS",
-                kerberos_service_name=auth["kerberos_service_name"]
             )
             return conn
     except Exception as e:
@@ -90,7 +70,7 @@ if "conn" in st.session_state:
                     rows.append(result)
                     result = ibm_db.fetch_assoc(stmt)
                 df = pd.DataFrame(rows)
-            else:  # MySQL, MS SQL, Hive
+            elif db_type == "MS SQL":
                 cursor = conn.cursor()
                 cursor.execute(query)
                 rows = cursor.fetchall()
