@@ -2,7 +2,9 @@
   "DB2": {
     "host": "localhost",
     "port": 50000,
-    "database": "testdb"
+    "database": "testdb",
+    "username": "db2user",  // Optional
+    "password": "db2pass"   // Optional
   },
   "MySQL": {
     "host": "localhost",
