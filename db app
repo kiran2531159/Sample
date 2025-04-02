@@ -1,133 +1,195 @@
-npm install ejs express cors body-parser knex pg mssql ibm_db hive-driver dotenv
---------------
+import streamlit as st
+import pandas as pd
+import json
+import matplotlib.pyplot as plt
+import plotly.express as px
+import pyodbc
+import pymysql
+import ibm_db
+import ibm_db_dbi
+from pyhive import hive
 
-/node-db-app
-│── /views          (UI Templates)
-│   │── index.ejs   (Home Page with Query Form)
-│── server.js       (Main Server File)
-│── dbController.js (Handles Database Logic)
-│── .env            (Environment Variables)
-│── package.json
---------------
-PORT=3000 .env file
-----------------Update server.js (Main Server)
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const dbController = require('./dbController');
+# Load user credentials from JSON file
+def load_users():
+    with open("users.json", "r") as file:
+        return json.load(file)
 
-const app = express();
-app.use(cors());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static('public'));
-app.set('view engine', 'ejs');
+# Authenticate user
+def authenticate(username, password):
+    users = load_users()
+    return username in users and users[username]["password"] == password
 
-app.get('/', (req, res) => res.render('index', { result: null, error: null }));
-app.post('/connect', dbController.connectDatabase);
-app.post('/query', dbController.executeQuery);
+# Fetch ODBC connections from Windows ODBC connector
+def get_odbc_connections():
+    try:
+        conn = pyodbc.connect("DSN=MSODBC")
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sys.odbc")
+        return [row[0] for row in cursor.fetchall()]
+    except:
+        return []
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+# Load DB connection details from JSON file
+def load_db_connections():
+    with open("db_connections.json", "r") as file:
+        return json.load(file)
 
+# Establish database connection
+def get_connection(db_type, host, port, user, password, database, odbc_dsn=None, kerberos=False):
+    try:
+        if odbc_dsn:
+            return pyodbc.connect(f"DSN={odbc_dsn}")
 
--------------Update dbController.js
-const knex = require('knex');
-const sql = require('mssql');
-const ibmdb = require('ibm_db');
-const { HiveClient, TCLIService } = require('hive-driver');
+        if db_type == "DB2":
+            conn_str = f"DATABASE={database};HOSTNAME={host};PORT={port};PROTOCOL=TCPIP;UID={user};PWD={password};"
+            return ibm_db_dbi.Connection(ibm_db.connect(conn_str, "", ""))
 
-let activeConnection = null;
+        elif db_type == "MySQL":
+            return pymysql.connect(host=host, user=user, password=password, database=database, port=int(port))
 
-async function connectDatabase(req, res) {
-  const { dbType, host, port, user, password } = req.body;
+        elif db_type == "MS SQL":
+            conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={host};DATABASE={database};UID={user};PWD={password}"
+            return pyodbc.connect(conn_str)
 
-  try {
-    if (dbType === 'pg') {
-      activeConnection = knex({
-        client: 'pg',
-        connection: { host, user, password, database: 'mydb', port },
-      });
-    } else if (dbType === 'mssql') {
-      activeConnection = await sql.connect({ user, password, server: host, database: 'mydb', options: { encrypt: true } });
-    } else if (dbType === 'db2') {
-      activeConnection = await ibmdb.open(`DATABASE=mydb;HOSTNAME=${host};UID=${user};PWD=${password};PORT=${port};PROTOCOL=TCPIP`);
-    } else if (dbType === 'hive') {
-      const hiveClient = new HiveClient(TCLIService);
-      activeConnection = await hiveClient.connect({ host, port, options: { kerberos_principal: `${user}@REALM` } });
-    } else {
-      return res.render('index', { result: null, error: 'Unsupported database type' });
-    }
+        elif db_type == "Hive":
+            return hive.Connection(
+                host=host, port=int(port), database=database,
+                auth='KERBEROS' if kerberos else 'NOSASL',
+                kerberos_service_name="hive" if kerberos else None
+            )
 
-    res.render('index', { result: `Connected to ${dbType.toUpperCase()}!`, error: null });
-  } catch (error) {
-    res.render('index', { result: null, error: error.message });
-  }
-}
+    except Exception as e:
+        st.error(f"Connection Error: {e}")
+        return None
 
-async function executeQuery(req, res) {
-  const { query } = req.body;
-  if (!activeConnection) return res.render('index', { result: null, error: 'No active connection' });
+# Streamlit UI
+st.set_page_config(page_title="Database Manager", layout="wide")
+st.title("🔗 Database Management App")
 
-  try {
-    let result;
-    if (activeConnection instanceof knex) {
-      result = await activeConnection.raw(query);
-    } else if (activeConnection instanceof sql.ConnectionPool) {
-      result = await activeConnection.request().query(query);
-    } else if (activeConnection instanceof ibmdb.Database) {
-      result = await activeConnection.query(query);
-    } else {
-      return res.render('index', { result: null, error: 'Invalid connection type' });
-    }
+# User Authentication
+if "authenticated" not in st.session_state:
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if authenticate(username, password):
+            st.session_state["authenticated"] = True
+            st.session_state["username"] = username
+            st.success("Login Successful!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid Username or Password")
+    st.stop()
 
-    res.render('index', { result: JSON.stringify(result, null, 2), error: null });
-  } catch (error) {
-    res.render('index', { result: null, error: error.message });
-  }
-}
+st.sidebar.write(f"👤 Logged in as **{st.session_state['username']}**")
 
-module.exports = { connectDatabase, executeQuery };
+# Load DB connection details
+db_config = load_db_connections()
 
----------------views/index.ejs (UI)
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Database Query Tool</title>
-</head>
-<body>
-    <h2>Connect to Database</h2>
-    <form action="/connect" method="POST">
-        <label>Database Type:</label>
-        <select name="dbType">
-            <option value="pg">PostgreSQL</option>
-            <option value="mssql">MSSQL</option>
-            <option value="db2">DB2</option>
-            <option value="hive">Hive</option>
-        </select>
-        <label>Host:</label> <input type="text" name="host" required>
-        <label>Port:</label> <input type="number" name="port" required>
-        <label>Username:</label> <input type="text" name="user" required>
-        <label>Password:</label> <input type="password" name="password" required>
-        <button type="submit">Connect</button>
-    </form>
+# Fetch ODBC connections
+odbc_connections = get_odbc_connections()
 
-    <% if (result) { %>
-        <h3>Result:</h3>
-        <pre><%= result %></pre>
-    <% } %>
-    <% if (error) { %>
-        <h3 style="color:red">Error:</h3>
-        <p><%= error %></p>
-    <% } %>
+# Database selection
+use_odbc = st.checkbox("Use ODBC Connection")
+if use_odbc and odbc_connections:
+    odbc_dsn = st.selectbox("Select ODBC Connection", odbc_connections)
+else:
+    db_type = st.selectbox("Select Database Type", ["DB2", "MySQL", "MS SQL", "Hive"])
+    host = st.text_input("Host")
+    port = st.text_input("Port")
+    user = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    database = st.text_input("Database Name")
 
-    <h2>Run SQL Query</h2>
-    <form action="/query" method="POST">
-        <textarea name="query" rows="4" cols="50" required></textarea>
-        <button type="submit">Execute</button>
-    </form>
-</body>
-</html>
-----------
+    if db_type == "Hive":
+        kerberos = st.checkbox("Use Kerberos Authentication")
+
+if st.button("Connect"):
+    conn = get_connection(db_type if not use_odbc else None, host, port, user, password, database, odbc_dsn if use_odbc else None)
+    if conn:
+        st.success("Connected successfully!")
+        st.session_state["conn"] = conn
+
+# If connection is established, enable further functionality
+if "conn" in st.session_state:
+    conn = st.session_state["conn"]
+
+    # Sidebar navigation
+    menu = st.sidebar.radio("Navigation", ["Run Query", "Query History", "Visualize Data"])
+
+    # Run SQL Query
+    if menu == "Run Query":
+        st.subheader("📝 Run SQL Query")
+        query = st.text_area("Enter SQL Query")
+        if st.button("Run Query"):
+            try:
+                df = pd.read_sql(query, conn)
+                st.dataframe(df)
+
+                # Save query to history
+                if "query_history" not in st.session_state:
+                    st.session_state["query_history"] = []
+                st.session_state["query_history"].append(query)
+
+                # Export options
+                st.download_button("Download as CSV", df.to_csv(index=False), "query_results.csv", "text/csv")
+                st.download_button("Download as Excel", df.to_excel(index=False, engine='openpyxl'), "query_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            except Exception as e:
+                st.error(f"Query Execution Error: {e}")
+
+    # Query History
+    elif menu == "Query History":
+        st.subheader("📜 Query History")
+        if "query_history" in st.session_state:
+            for i, q in enumerate(reversed(st.session_state["query_history"])):
+                st.write(f"{i+1}. {q}")
+        else:
+            st.info("No queries executed yet.")
+
+    # Data Visualization
+    elif menu == "Visualize Data":
+        st.subheader("📊 Data Visualization")
+
+        # Allow user to enter a SQL query for visualization
+        query = st.text_area("Enter SQL Query for Visualization")
+        chart_type = st.selectbox("Select Chart Type", ["Bar", "Line", "Scatter"])
+        visualization_lib = st.selectbox("Select Visualization Library", ["Matplotlib", "Plotly"])
+        x_axis = st.text_input("X-axis Column Name")
+        y_axis = st.text_input("Y-axis Column Name")
+
+        if st.button("Generate Chart"):
+            try:
+                df = pd.read_sql(query, conn)
+
+                # Validate column names
+                if x_axis not in df.columns or y_axis not in df.columns:
+                    st.error("Invalid column names. Please check your input.")
+                else:
+                    if visualization_lib == "Matplotlib":
+                        fig, ax = plt.subplots()
+                        
+                        if chart_type == "Bar":
+                            ax.bar(df[x_axis], df[y_axis])
+                        elif chart_type == "Line":
+                            ax.plot(df[x_axis], df[y_axis], marker="o")
+                        elif chart_type == "Scatter":
+                            ax.scatter(df[x_axis], df[y_axis])
+
+                        ax.set_xlabel(x_axis)
+                        ax.set_ylabel(y_axis)
+                        ax.set_title(f"{chart_type} Chart")
+
+                        st.pyplot(fig)
+
+                    elif visualization_lib == "Plotly":
+                        if chart_type == "Bar":
+                            fig = px.bar(df, x=x_axis, y=y_axis, title=f"{chart_type} Chart")
+                        elif chart_type == "Line":
+                            fig = px.line(df, x=x_axis, y=y_axis, markers=True, title=f"{chart_type} Chart")
+                        elif chart_type == "Scatter":
+                            fig = px.scatter(df, x=x_axis, y=y_axis, title=f"{chart_type} Chart")
+
+                        st.plotly_chart(fig)
+
+            except Exception as e:
+                st.error(f"Error generating visualization: {e}")
