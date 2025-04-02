@@ -36,20 +36,22 @@ def connect_to_db(db_type, auth):
     try:
         if db_type == "DB2":
             conn_str = f"DATABASE={auth['database']};HOSTNAME={auth['host']};PORT={auth['port']};PROTOCOL=TCPIP;"
-            conn = ibm_db.connect(conn_str, "", "")
+            username = auth.get("username", "")
+            password = auth.get("password", "")
+            conn = ibm_db.connect(conn_str, username, password)
             return conn
         elif db_type == "MySQL":
             conn = mysql.connector.connect(
                 host=auth["host"],
                 port=auth["port"],
                 database=auth["database"],
-                user=auth["username"],
-                password=auth["password"]
+                user=auth.get("username", ""),
+                password=auth.get("password", "")
             )
             return conn
         elif db_type == "MS SQL":
             conn = pyodbc.connect(
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={auth['host']},{auth['port']};DATABASE={auth['database']};UID={auth['username']};PWD={auth['password']}"
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={auth['host']},{auth['port']};DATABASE={auth['database']};UID={auth.get('username', '')};PWD={auth.get('password', '')}"
             )
             return conn
         elif db_type == "Hive":
