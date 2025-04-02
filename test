@@ -1,36 +1,27 @@
 {
-  "connections": {
-    "db2": {
-      "host": "your-db2-host",
-      "port": "50000",
-      "database": "sample_db",
-      "username": "db2_user",
-      "password": "db2_password"
-    },
-    "mysql": {
-      "host": "your-mysql-host",
-      "port": "3306",
-      "database": "sample_db",
-      "username": "mysql_user",
-      "password": "mysql_password"
-    },
-    "mssql": {
-      "host": "your-mssql-host",
-      "port": "1433",
-      "database": "sample_db",
-      "username": "mssql_user",
-      "password": "mssql_password"
-    },
-    "hive": {
-      "host": "your-hive-host",
-      "port": "10000",
-      "database": "sample_db",
-      "username": "hive_user",
-      "password": "hive_password",
-      "kerberos": true
-    },
-    "odbc": {
-      "dsn": "your-odbc-dsn"
-    }
+  "DB2": {
+    "host": "localhost",
+    "port": 50000,
+    "database": "testdb"
+  },
+  "MySQL": {
+    "host": "localhost",
+    "port": 3306,
+    "database": "testdb",
+    "username": "root",
+    "password": "your_password"
+  },
+  "MS SQL": {
+    "host": "localhost",
+    "port": 1433,
+    "database": "testdb",
+    "username": "sa",
+    "password": "your_password"
+  },
+  "Hive": {
+    "host": "localhost",
+    "port": 10000,
+    "database": "default",
+    "kerberos_service_name": "hive"
   }
 }
