@@ -1,198 +1,149 @@
-
-pip install streamlit ibm-db pymysql pyodbc sqlalchemy pandas openpyxl thrift_sasl pyhive matplotlib plotly
-
 import streamlit as st
 import pandas as pd
 import json
+import ibm_db
+import mysql.connector
+import pyodbc
+from pyhive import hive
 import matplotlib.pyplot as plt
 import plotly.express as px
-import pyodbc
-import pymysql
-import ibm_db
-import ibm_db_dbi
-from pyhive import hive
 
-# Load user credentials from JSON file
-def load_users():
-    with open("users.json", "r") as file:
-        return json.load(file)
+# Streamlit app title
+st.title("Database Management App with Visualizations")
 
-# Authenticate user
-def authenticate(username, password):
-    users = load_users()
-    return username in users and users[username]["password"] == password
-
-# Fetch ODBC connections from Windows ODBC connector
-def get_odbc_connections():
-    try:
-        conn = pyodbc.connect("DSN=MSODBC")
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sys.odbc")
-        return [row[0] for row in cursor.fetchall()]
-    except:
-        return []
-
-# Load DB connection details from JSON file
-def load_db_connections():
-    with open("db_connections.json", "r") as file:
-        return json.load(file)
-
-# Establish database connection
-def get_connection(db_type, host, port, user, password, database, odbc_dsn=None, kerberos=False):
-    try:
-        if odbc_dsn:
-            return pyodbc.connect(f"DSN={odbc_dsn}")
-
-        if db_type == "DB2":
-            conn_str = f"DATABASE={database};HOSTNAME={host};PORT={port};PROTOCOL=TCPIP;UID={user};PWD={password};"
-            return ibm_db_dbi.Connection(ibm_db.connect(conn_str, "", ""))
-
-        elif db_type == "MySQL":
-            return pymysql.connect(host=host, user=user, password=password, database=database, port=int(port))
-
-        elif db_type == "MS SQL":
-            conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={host};DATABASE={database};UID={user};PWD={password}"
-            return pyodbc.connect(conn_str)
-
-        elif db_type == "Hive":
-            return hive.Connection(
-                host=host, port=int(port), database=database,
-                auth='KERBEROS' if kerberos else 'NOSASL',
-                kerberos_service_name="hive" if kerberos else None
-            )
-
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
-        return None
-
-# Streamlit UI
-st.set_page_config(page_title="Database Manager", layout="wide")
-st.title("🔗 Database Management App")
-
-# User Authentication
-if "authenticated" not in st.session_state:
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if authenticate(username, password):
-            st.session_state["authenticated"] = True
-            st.session_state["username"] = username
-            st.success("Login Successful!")
-            st.experimental_rerun()
-        else:
-            st.error("Invalid Username or Password")
+# Load authentication details from JSON
+try:
+    with open("auth.json", "r") as f:
+        auth_data = json.load(f)
+except FileNotFoundError:
+    st.error("auth.json file not found. Please create it with the required credentials.")
     st.stop()
 
-st.sidebar.write(f"👤 Logged in as **{st.session_state['username']}**")
-
-# Load DB connection details
-db_config = load_db_connections()
-
-# Fetch ODBC connections
-odbc_connections = get_odbc_connections()
-
 # Database selection
-use_odbc = st.checkbox("Use ODBC Connection")
-if use_odbc and odbc_connections:
-    odbc_dsn = st.selectbox("Select ODBC Connection", odbc_connections)
+db_type = st.selectbox("Select Database Type", ["DB2", "MySQL", "MS SQL", "Hive"])
+
+# Display connection details from JSON (read-only)
+st.subheader("Connection Details (Loaded from auth.json)")
+if db_type in auth_data:
+    st.write(auth_data[db_type])
 else:
-    db_type = st.selectbox("Select Database Type", ["DB2", "MySQL", "MS SQL", "Hive"])
-    host = st.text_input("Host")
-    port = st.text_input("Port")
-    user = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    database = st.text_input("Database Name")
+    st.error(f"No configuration found for {db_type} in auth.json")
+    st.stop()
 
-    if db_type == "Hive":
-        kerberos = st.checkbox("Use Kerberos Authentication")
+# Function to connect to the database
+@st.cache_resource
+def connect_to_db(db_type, auth):
+    try:
+        if db_type == "DB2":
+            conn_str = f"DATABASE={auth['database']};HOSTNAME={auth['host']};PORT={auth['port']};PROTOCOL=TCPIP;"
+            conn = ibm_db.connect(conn_str, "", "")
+            return conn
+        elif db_type == "MySQL":
+            conn = mysql.connector.connect(
+                host=auth["host"],
+                port=auth["port"],
+                database=auth["database"],
+                user=auth["username"],
+                password=auth["password"]
+            )
+            return conn
+        elif db_type == "MS SQL":
+            conn = pyodbc.connect(
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={auth['host']},{auth['port']};DATABASE={auth['database']};UID={auth['username']};PWD={auth['password']}"
+            )
+            return conn
+        elif db_type == "Hive":
+            conn = hive.connect(
+                host=auth["host"],
+                port=auth["port"],
+                database=auth["database"],
+                auth="KERBEROS",
+                kerberos_service_name=auth["kerberos_service_name"]
+            )
+            return conn
+    except Exception as e:
+        st.error(f"Connection failed: {str(e)}")
+        return None
 
+# Connect button
 if st.button("Connect"):
-    conn = get_connection(db_type if not use_odbc else None, host, port, user, password, database, odbc_dsn if use_odbc else None)
+    conn = connect_to_db(db_type, auth_data[db_type])
     if conn:
-        st.success("Connected successfully!")
         st.session_state["conn"] = conn
+        st.success(f"Connected to {db_type} database successfully!")
 
-# If connection is established, enable further functionality
+# Query execution section
 if "conn" in st.session_state:
-    conn = st.session_state["conn"]
+    st.subheader("Run SQL Query")
+    query = st.text_area("Enter your SQL query", "SELECT * FROM table_name LIMIT 10")
+    
+    if st.button("Execute Query"):
+        conn = st.session_state["conn"]
+        try:
+            if db_type == "DB2":
+                stmt = ibm_db.exec_immediate(conn, query)
+                result = ibm_db.fetch_assoc(stmt)
+                rows = []
+                while result:
+                    rows.append(result)
+                    result = ibm_db.fetch_assoc(stmt)
+                df = pd.DataFrame(rows)
+            else:  # MySQL, MS SQL, Hive
+                cursor = conn.cursor()
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                df = pd.DataFrame(rows, columns=columns)
+                cursor.close()
+            
+            st.session_state["query_result"] = df
+            st.write("Query Results:")
+            st.dataframe(df)
+        except Exception as e:
+            st.error(f"Query failed: {str(e)}")
 
-    # Sidebar navigation
-    menu = st.sidebar.radio("Navigation", ["Run Query", "Query History", "Visualize Data"])
-
-    # Run SQL Query
-    if menu == "Run Query":
-        st.subheader("📝 Run SQL Query")
-        query = st.text_area("Enter SQL Query")
-        if st.button("Run Query"):
-            try:
-                df = pd.read_sql(query, conn)
-                st.dataframe(df)
-
-                # Save query to history
-                if "query_history" not in st.session_state:
-                    st.session_state["query_history"] = []
-                st.session_state["query_history"].append(query)
-
-                # Export options
-                st.download_button("Download as CSV", df.to_csv(index=False), "query_results.csv", "text/csv")
-                st.download_button("Download as Excel", df.to_excel(index=False, engine='openpyxl'), "query_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-            except Exception as e:
-                st.error(f"Query Execution Error: {e}")
-
-    # Query History
-    elif menu == "Query History":
-        st.subheader("📜 Query History")
-        if "query_history" in st.session_state:
-            for i, q in enumerate(reversed(st.session_state["query_history"])):
-                st.write(f"{i+1}. {q}")
-        else:
-            st.info("No queries executed yet.")
-
-    # Data Visualization
-    elif menu == "Visualize Data":
-        st.subheader("📊 Data Visualization")
-
-        # Allow user to enter a SQL query for visualization
-        query = st.text_area("Enter SQL Query for Visualization")
-        chart_type = st.selectbox("Select Chart Type", ["Bar", "Line", "Scatter"])
-        visualization_lib = st.selectbox("Select Visualization Library", ["Matplotlib", "Plotly"])
-        x_axis = st.text_input("X-axis Column Name")
-        y_axis = st.text_input("Y-axis Column Name")
+    # Visualization section
+    if "query_result" in st.session_state:
+        df = st.session_state["query_result"]
+        st.subheader("Visualize Results")
+        
+        viz_library = st.selectbox("Select Visualization Library", ["Matplotlib", "Plotly"])
+        chart_type = st.selectbox("Select Chart Type", ["Bar", "Line", "Pie"])
+        x_col = st.selectbox("Select X-axis column", df.columns)
+        y_col = st.selectbox("Select Y-axis column (for Bar/Line)", df.columns if chart_type != "Pie" else [None])
 
         if st.button("Generate Chart"):
-            try:
-                df = pd.read_sql(query, conn)
+            if viz_library == "Matplotlib":
+                plt.figure(figsize=(10, 6))
+                if chart_type == "Bar":
+                    plt.bar(df[x_col], df[y_col])
+                    plt.xlabel(x_col)
+                    plt.ylabel(y_col)
+                    plt.title(f"{y_col} by {x_col}")
+                elif chart_type == "Line":
+                    plt.plot(df[x_col], df[y_col], marker="o")
+                    plt.xlabel(x_col)
+                    plt.ylabel(y_col)
+                    plt.title(f"{y_col} over {x_col}")
+                elif chart_type == "Pie":
+                    plt.pie(df[x_col], labels=df[x_col].index if df[x_col].dtype == "object" else None, autopct="%1.1f%%")
+                    plt.title(f"Distribution of {x_col}")
+                plt.tight_layout()
+                st.pyplot(plt)
+            
+            elif viz_library == "Plotly":
+                if chart_type == "Bar":
+                    fig = px.bar(df, x=x_col, y=y_col, title=f"{y_col} by {x_col}")
+                elif chart_type == "Line":
+                    fig = px.line(df, x=x_col, y=y_col, title=f"{y_col} over {x_col}", markers=True)
+                elif chart_type == "Pie":
+                    fig = px.pie(df, names=x_col, title=f"Distribution of {x_col}")
+                st.plotly_chart(fig, use_container_width=True)
 
-                # Validate column names
-                if x_axis not in df.columns or y_axis not in df.columns:
-                    st.error("Invalid column names. Please check your input.")
-                else:
-                    if visualization_lib == "Matplotlib":
-                        fig, ax = plt.subplots()
-                        
-                        if chart_type == "Bar":
-                            ax.bar(df[x_axis], df[y_axis])
-                        elif chart_type == "Line":
-                            ax.plot(df[x_axis], df[y_axis], marker="o")
-                        elif chart_type == "Scatter":
-                            ax.scatter(df[x_axis], df[y_axis])
-
-                        ax.set_xlabel(x_axis)
-                        ax.set_ylabel(y_axis)
-                        ax.set_title(f"{chart_type} Chart")
-
-                        st.pyplot(fig)
-
-                    elif visualization_lib == "Plotly":
-                        if chart_type == "Bar":
-                            fig = px.bar(df, x=x_axis, y=y_axis, title=f"{chart_type} Chart")
-                        elif chart_type == "Line":
-                            fig = px.line(df, x=x_axis, y=y_axis, markers=True, title=f"{chart_type} Chart")
-                        elif chart_type == "Scatter":
-                            fig = px.scatter(df, x=x_axis, y=y_axis, title=f"{chart_type} Chart")
-
-                        st.plotly_chart(fig)
-
-            except Exception as e:
-                st.error(f"Error generating visualization: {e}")
+# Disconnect button
+if "conn" in st.session_state and st.button("Disconnect"):
+    st.session_state["conn"].close()
+    del st.session_state["conn"]
+    if "query_result" in st.session_state:
+        del st.session_state["query_result"]
+    st.success("Disconnected successfully!")
