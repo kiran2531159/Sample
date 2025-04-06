@@ -1,29 +1,28 @@
-{
-  "DB2": {
-    "host": "localhost",
-    "port": 50000,
-    "database": "testdb",
-    "username": "db2user",  // Optional
-    "password": "db2pass"   // Optional
-  },
-  "MySQL": {
-    "host": "localhost",
-    "port": 3306,
-    "database": "testdb",
-    "username": "root",
-    "password": "your_password"
-  },
-  "MS SQL": {
-    "host": "localhost",
-    "port": 1433,
-    "database": "testdb",
-    "username": "sa",
-    "password": "your_password"
-  },
-  "Hive": {
-    "host": "localhost",
-    "port": 10000,
-    "database": "default",
-    "kerberos_service_name": "hive"
-  }
-}
+from pyspark.sql import SparkSession
+import subprocess
+import Orange
+
+# Kerberos authentication
+keytab = "/path/to/user.keytab"
+principal = "user@REALM.COM"
+subprocess.check_call(f"kinit -kt {keytab} {principal}", shell=True)
+
+# Spark session
+spark = SparkSession.builder \
+    .appName("OrangeKerberosSpark") \
+    .master("yarn") \
+    .config("spark.yarn.keytab", keytab) \
+    .config("spark.yarn.principal", principal) \
+    .config("spark.hadoop.security.authentication", "kerberos") \
+    .getOrCreate()
+
+# Load and process data
+df = spark.read.csv("hdfs://namenode:8021/path/to/data.csv", header=True, inferSchema=True)
+filtered_df = df.filter(df["some_column"] > 10)
+
+# Convert to Orange Table
+pandas_df = filtered_df.toPandas()
+out_data = Orange.data.Table(pandas_df)
+
+# Stop Spark
+spark.stop()
