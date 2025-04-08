@@ -18,16 +18,12 @@ try:
     print("Using existing Kerberos ticket")
 except subprocess.CalledProcessError as e:
     raise Exception(f"Kerberos ticket check failed: {e}. Ensure you have a valid ticket.")
-
-# Initialize Spark session with Kerberos, no keytab
 spark = SparkSession.builder \
     .appName("OrangeKerberosSparkNoKeytab") \
-    .master("yarn") \  # Use "yarn" for cluster, "local" for testing
-    .config("spark.yarn.principal", principal) \
+    .master("yarn") \
+    .config("spark.yarn.principal", "user@REALM.COM") \
     .config("spark.hadoop.security.authentication", "kerberos") \
-    .config("spark.hadoop.security.authorization", "true") \
-    .config("spark.driver.memory", "4g") \
-    .config("spark.executor.memory", "4g") \
+    .config("spark.driver.java.options", "-Dsun.security.krb5.debug=true") \  # Enable Kerberos debug
     .getOrCreate()
 
 # Verify Spark session
