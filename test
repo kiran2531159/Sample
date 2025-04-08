@@ -1,22 +1,39 @@
 from pyspark.sql import SparkSession
-import subprocess
+import os
 import Orange
 
-# Kerberos authentication
-keytab = "/path/to/user.keytab"
-principal = "user@REALM.COM"
-subprocess.check_call(f"kinit -kt {keytab} {principal}", shell=True)
+# Set the KRB5_CONFIG environment variable (optional, if using a custom krb5.conf)
+krb5_conf_path = "/path/to/custom/krb5.conf"  # Replace with your krb5.conf path
+os.environ["KRB5_CONFIG"] = krb5_conf_path
 
-# Spark session
+# Assume a Kerberos ticket is already available in the cache
+# You can verify this manually with: klist
+principal = "user@REALM.COM"  # Your Kerberos principal
+
+# Check if a ticket exists (optional validation)
+try:
+    output = subprocess.check_output("klist", shell=True, text=True)
+    if principal not in output:
+        raise Exception(f"No valid ticket found for {principal}. Run 'kinit {principal}' first.")
+    print("Using existing Kerberos ticket")
+except subprocess.CalledProcessError as e:
+    raise Exception(f"Kerberos ticket check failed: {e}. Ensure you have a valid ticket.")
+
+# Initialize Spark session with Kerberos, no keytab
 spark = SparkSession.builder \
-    .appName("OrangeKerberosSpark") \
-    .master("yarn") \
-    .config("spark.yarn.keytab", keytab) \
+    .appName("OrangeKerberosSparkNoKeytab") \
+    .master("yarn") \  # Use "yarn" for cluster, "local" for testing
     .config("spark.yarn.principal", principal) \
     .config("spark.hadoop.security.authentication", "kerberos") \
+    .config("spark.hadoop.security.authorization", "true") \
+    .config("spark.driver.memory", "4g") \
+    .config("spark.executor.memory", "4g") \
     .getOrCreate()
 
-# Load and process data
+# Verify Spark session
+print(f"Spark version: {spark.version}")
+
+# Load and process data from a Kerberos-secured HDFS
 df = spark.read.csv("hdfs://namenode:8021/path/to/data.csv", header=True, inferSchema=True)
 filtered_df = df.filter(df["some_column"] > 10)
 
@@ -24,5 +41,5 @@ filtered_df = df.filter(df["some_column"] > 10)
 pandas_df = filtered_df.toPandas()
 out_data = Orange.data.Table(pandas_df)
 
-# Stop Spark
+# Stop Spark session
 spark.stop()
